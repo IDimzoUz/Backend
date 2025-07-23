@@ -1,0 +1,38 @@
+stages:
+  - build_and_push
+  - deploy
+
+variables:
+  CONTAINER_NAME: idimzo-backend-java
+  DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE
+  DOCKER_IMAGE_TAG: $CI_COMMIT_REF_SLUG
+
+build_and_push:
+  stage: build_and_push
+  image: docker:dind
+  services:
+    - docker:dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $DOCKER_IMAGE_NAME:$DOCKER_IMAGE_TAG .
+    - docker push $DOCKER_IMAGE_NAME:$DOCKER_IMAGE_TAG
+  after_script:
+    - docker images
+  only:
+    - main
+
+deploy:
+  stage: deploy
+  when: manual
+  tags:
+    - ownrunner
+  before_script:
+    - apk add --no-cache openssh-client sshpass
+  script:
+    - sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_SERVER_IP "docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY"
+    - sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_SERVER_IP "docker pull $DOCKER_IMAGE_NAME:$DOCKER_IMAGE_TAG"
+    - sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_SERVER_IP "docker stop $CONTAINER_NAME || true"
+    - sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_SERVER_IP "docker rm $CONTAINER_NAME || true"
+    - sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_SERVER_IP "docker run -d -p 8088:8088 -e DB_URL='jdbc:postgresql://217.29.121.40:5432/idimzo' -e ACTIVE_PROFILE=dev -e SMS_API_KEY=$KEY -e SMS_BASE_URL='https://api.smsfly.uz' -e DB_NAME='idimzo' -e DB_USERNAME='idimzo_user' -e DB_PASSWORD=$POSTGRES_PASS --name $CONTAINER_NAME  $DOCKER_IMAGE_NAME:$DOCKER_IMAGE_TAG"
+  only:
+    - main
